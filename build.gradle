@@ -1,0 +1,42 @@
+plugins {
+    id 'java'
+}
+
+group 'com.KickHistory'
+version '1.0-SNAPSHOT'
+
+// Hub Requirement: Must target Java 17 for 2026 compatibility
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+repositories {
+    // RuneLite repo MUST be first to avoid ancient 2017 versions on MavenCentral
+    maven { url 'https://repo.runelite.net' }
+    mavenCentral()
+}
+
+dependencies {
+    // Hub Standard: Use 'runelite-api' (not 'api') and 'client'
+    compileOnly 'net.runelite:runelite-api:1.12.26.3'
+    compileOnly 'net.runelite:client:1.12.26.3'
+
+    compileOnly 'org.projectlombok:lombok:1.18.30'
+    annotationProcessor 'org.projectlombok:lombok:1.18.30'
+
+    // Local Test Dependencies: Must match the client version exactly
+    testImplementation 'net.runelite:runelite-api:1.12.26.3'
+    testImplementation 'net.runelite:client:1.12.26.3'
+    testAnnotationProcessor 'org.projectlombok:lombok:1.18.30'
+}
+
+// Manual Run Task: Added the required '-ea' flag to satisfy startup checks
+tasks.register('run', JavaExec) {
+    group = "runelite"
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.KickHistory.KickHistoryTest'
+    jvmArgs = ["-ea"]
+    args = ["--developer-mode"]
+}
