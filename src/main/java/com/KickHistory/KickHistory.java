@@ -9,13 +9,14 @@ import net.runelite.api.events.FriendsChatMemberLeft;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.events.ConfigChanged; // Added for live-toggling
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.Text;
-import okhttp3.*; // Needed for the webhook HTTP requests
+import okhttp3.*;
 
 import java.awt.image.BufferedImage;
 import java.io.IOException;
@@ -31,10 +32,10 @@ import java.util.LinkedList;
 public class KickHistory extends Plugin
 {
     @Inject
-    private Client client; // Needed to get the local player's name
+    private Client client;
 
     @Inject
-    private OkHttpClient okHttpClient; // RuneLite's native HTTP client for webhooks
+    private OkHttpClient okHttpClient;
 
     @Inject
     private ClientToolbar clientToolbar;
@@ -70,7 +71,11 @@ public class KickHistory extends Plugin
                 .panel(panel)
                 .build();
 
-        clientToolbar.addNavigation(navButton);
+        // Only show the icon on startup if the config says so
+        if (config.showSidePanel())
+        {
+            clientToolbar.addNavigation(navButton);
+        }
     }
 
     @Override
@@ -78,6 +83,27 @@ public class KickHistory extends Plugin
     {
         clientToolbar.removeNavigation(navButton);
         pendingKicks.clear();
+    }
+
+    @Subscribe
+    public void onConfigChanged(ConfigChanged event)
+    {
+        if (!event.getGroup().equals("kickhistory"))
+        {
+            return;
+        }
+
+        if (event.getKey().equals("showSidePanel"))
+        {
+            if (config.showSidePanel())
+            {
+                clientToolbar.addNavigation(navButton);
+            }
+            else
+            {
+                clientToolbar.removeNavigation(navButton);
+            }
+        }
     }
 
     @Subscribe
@@ -94,7 +120,6 @@ public class KickHistory extends Plugin
 
             String cleanName = target.replace('\u00A0', ' ').trim();
 
-            // OPTIMIZATION: Guard Clause. OSRS names cannot be empty or > 12 characters.
             if (cleanName.isEmpty() || cleanName.length() > 12) {
                 return;
             }
@@ -108,8 +133,6 @@ public class KickHistory extends Plugin
     public void onFriendsChatMemberLeft(FriendsChatMemberLeft event)
     {
         String rawLeftName = Text.removeTags(event.getMember().getName()).replace('\u00A0', ' ').trim();
-
-        // OPTIMIZATION: Use RuneLite's native standardize tool to ensure perfect matching
         String standardLeftName = Text.standardize(rawLeftName);
 
         Iterator<PendingKick> it = pendingKicks.iterator();
@@ -122,16 +145,13 @@ public class KickHistory extends Plugin
                 continue;
             }
 
-            // Standardize our queued name so we are comparing apples to apples
             if (Text.standardize(pk.name).equals(standardLeftName))
             {
                 log.info("Kick confirmed via FC Leave for: " + pk.name);
                 it.remove();
 
-                // 1. Update the Sidebar
                 SwingUtilities.invokeLater(() -> panel.addKick(pk.name));
 
-                // 2. Fire the Webhook
                 sendWebhook(pk.name);
 
                 break;
@@ -139,9 +159,6 @@ public class KickHistory extends Plugin
         }
     }
 
-    /**
-     * Sends a POST request to the configured Discord Webhook URL.
-     */
     private void sendWebhook(String kickedPlayer)
     {
         if (!config.webhookEnabled() || config.webhookUrl().isEmpty())
@@ -149,13 +166,11 @@ public class KickHistory extends Plugin
             return;
         }
 
-        // Safely get the current player's name
         String adminName = "Unknown";
         if (client.getLocalPlayer() != null && client.getLocalPlayer().getName() != null) {
             adminName = client.getLocalPlayer().getName();
         }
 
-        // Build a simple JSON payload formatted for Discord
         String jsonPayload = String.format("{\"content\": \"**Kick Logged:** `%s` was kicked from the chat by `%s`\"}",
                 kickedPlayer, adminName);
 
@@ -164,7 +179,6 @@ public class KickHistory extends Plugin
                 .post(RequestBody.create(MediaType.parse("application/json; charset=utf-8"), jsonPayload))
                 .build();
 
-        // Enqueue sends the request asynchronously so the game client doesn't freeze
         okHttpClient.newCall(request).enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
@@ -173,7 +187,7 @@ public class KickHistory extends Plugin
 
             @Override
             public void onResponse(Call call, Response response) throws IOException {
-                response.close(); // You must always close the response to prevent memory leaks
+                response.close();
             }
         });
     }

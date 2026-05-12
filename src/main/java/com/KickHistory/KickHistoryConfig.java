@@ -40,10 +40,21 @@ public interface KickHistoryConfig extends Config
     }
 
     @ConfigItem(
+            keyName = "showSidePanel",
+            name = "Show Side Panel Icon",
+            description = "Toggle the side panel icon on or off. Note: Requires a plugin restart or toggle to update.",
+            position = 3
+    )
+    default boolean showSidePanel()
+    {
+        return true;
+    }
+
+    @ConfigItem(
             keyName = "webhookEnabled",
             name = "Enable Discord Webhook",
             description = "Toggle sending kick logs to a Discord webhook.",
-            position = 3
+            position = 4
     )
     default boolean webhookEnabled()
     {
@@ -54,7 +65,7 @@ public interface KickHistoryConfig extends Config
             keyName = "webhookUrl",
             name = "Webhook URL",
             description = "The Discord Webhook URL to send messages to.",
-            position = 4,
+            position = 5,
             secret = true
     )
     default String webhookUrl()
