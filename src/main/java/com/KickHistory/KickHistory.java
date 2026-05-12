@@ -9,7 +9,7 @@ import net.runelite.api.events.FriendsChatMemberLeft;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
-import net.runelite.client.events.ConfigChanged; // Added for live-toggling
+import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
@@ -71,7 +71,6 @@ public class KickHistory extends Plugin
                 .panel(panel)
                 .build();
 
-        // Only show the icon on startup if the config says so
         if (config.showSidePanel())
         {
             clientToolbar.addNavigation(navButton);
@@ -110,10 +109,11 @@ public class KickHistory extends Plugin
     public void onMenuOptionClicked(MenuOptionClicked event)
     {
         String option = Text.removeTags(event.getMenuOption());
+        String target = Text.removeTags(event.getMenuTarget());
 
+        // 1. Detect the initial "Kick" click
         if (option.startsWith("Kick user") || option.startsWith("Kick") || option.equalsIgnoreCase("Exclude"))
         {
-            String target = Text.removeTags(event.getMenuTarget());
             if (target.contains("(")) {
                 target = target.substring(0, target.indexOf("("));
             }
@@ -126,6 +126,17 @@ public class KickHistory extends Plugin
 
             pendingKicks.add(new PendingKick(cleanName, System.currentTimeMillis()));
             log.info("Registered kick target: " + cleanName);
+        }
+        // 2. Detect the "Confirm kick" button from the Chat Channels plugin or OSRS dialogs
+        else if (option.equalsIgnoreCase("Confirm kick"))
+        {
+            if (!pendingKicks.isEmpty())
+            {
+                // Refresh the timestamp for the most recent kick so it doesn't expire
+                PendingKick lastKick = pendingKicks.getLast();
+                lastKick.time = System.currentTimeMillis();
+                log.info("Kick confirmed in dialog. Refreshing timer for: " + lastKick.name);
+            }
         }
     }
 
@@ -140,7 +151,8 @@ public class KickHistory extends Plugin
         {
             PendingKick pk = it.next();
 
-            if (System.currentTimeMillis() - pk.time > 5000) {
+            // Window increased to 60 seconds to allow for slow confirmation screens
+            if (System.currentTimeMillis() - pk.time > 30000) {
                 it.remove();
                 continue;
             }
@@ -151,7 +163,6 @@ public class KickHistory extends Plugin
                 it.remove();
 
                 SwingUtilities.invokeLater(() -> panel.addKick(pk.name));
-
                 sendWebhook(pk.name);
 
                 break;
