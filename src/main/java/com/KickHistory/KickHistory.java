@@ -5,6 +5,9 @@ import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
+import net.runelite.api.FriendsChatManager;
+import net.runelite.api.FriendsChatMember;
+import net.runelite.api.events.FriendsChatChanged;
 import net.runelite.api.events.FriendsChatMemberLeft;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.client.config.ConfigManager;
@@ -20,13 +23,15 @@ import okhttp3.*;
 
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedList;
+import java.util.List;
 
 @Slf4j
 @PluginDescriptor(
         name = "Kick History",
-        description = "Logs names of players kicked from Friends Chat",
+        description = "Logs names of players kicked from specific Friends Chats",
         tags = {"friends", "chat", "kick", "log"}
 )
 public class KickHistory extends Plugin
@@ -46,13 +51,20 @@ public class KickHistory extends Plugin
     private KickHistoryPanel panel;
     private NavigationButton navButton;
 
-    private static class PendingKick {
-        String name;
-        long time;
+    // Cached list of target FCs for performance
+    private final List<String> targetFcs = new ArrayList<>();
 
-        PendingKick(String name, long time) {
-            this.name = name;
+    private static class PendingKick {
+        String displayName;
+        String standardName;
+        long time;
+        int world;
+
+        PendingKick(String displayName, String standardName, long time, int world) {
+            this.displayName = displayName;
+            this.standardName = standardName;
             this.time = time;
+            this.world = world;
         }
     }
 
@@ -75,6 +87,9 @@ public class KickHistory extends Plugin
         {
             clientToolbar.addNavigation(navButton);
         }
+
+        // Build the cached list on startup
+        updateTargetFcs();
     }
 
     @Override
@@ -82,6 +97,21 @@ public class KickHistory extends Plugin
     {
         clientToolbar.removeNavigation(navButton);
         pendingKicks.clear();
+        targetFcs.clear();
+    }
+
+    // --- Helper to build the cached list once ---
+    private void updateTargetFcs()
+    {
+        targetFcs.clear();
+        String targetFcConfig = config.targetFcName();
+        if (targetFcConfig != null && !targetFcConfig.trim().isEmpty())
+        {
+            for (String owner : targetFcConfig.split(","))
+            {
+                targetFcs.add(Text.standardize(owner.trim()));
+            }
+        }
     }
 
     @Subscribe
@@ -103,6 +133,27 @@ public class KickHistory extends Plugin
                 clientToolbar.removeNavigation(navButton);
             }
         }
+        else if (event.getKey().equals("targetFcName"))
+        {
+            // Rebuild the cached list if the user edits the text box
+            updateTargetFcs();
+        }
+    }
+
+    // --- Highly optimized check using the cached list ---
+    private boolean isInTargetFC()
+    {
+        if (targetFcs.isEmpty()) {
+            return false;
+        }
+
+        FriendsChatManager fcManager = client.getFriendsChatManager();
+        if (fcManager == null || fcManager.getOwner() == null) {
+            return false;
+        }
+
+        String currentOwner = Text.standardize(fcManager.getOwner());
+        return targetFcs.contains(currentOwner);
     }
 
     @Subscribe
@@ -111,68 +162,97 @@ public class KickHistory extends Plugin
         String option = Text.removeTags(event.getMenuOption());
         String target = Text.removeTags(event.getMenuTarget());
 
-        // 1. Detect the initial "Kick" click
         if (option.startsWith("Kick user") || option.startsWith("Kick") || option.equalsIgnoreCase("Exclude"))
         {
+            if (!isInTargetFC()) {
+                return;
+            }
+
             if (target.contains("(")) {
                 target = target.substring(0, target.indexOf("("));
             }
 
-            String cleanName = target.replace('\u00A0', ' ').trim();
+            String displayName = target.trim();
+            String standardName = Text.standardize(displayName);
 
-            if (cleanName.isEmpty() || cleanName.length() > 12) {
+            if (displayName.isEmpty() || displayName.length() > 12) {
                 return;
             }
 
-            pendingKicks.add(new PendingKick(cleanName, System.currentTimeMillis()));
-            log.info("Registered kick target: " + cleanName);
+            int world = getPlayerWorld(standardName);
+
+            pendingKicks.add(new PendingKick(displayName, standardName, System.currentTimeMillis(), world));
+            log.info("Registered FC kick target: " + displayName + " on world " + world);
         }
-        // 2. Detect the "Confirm kick" button from the Chat Channels plugin or OSRS dialogs
         else if (option.equalsIgnoreCase("Confirm kick"))
         {
-            if (!pendingKicks.isEmpty())
+            if (!pendingKicks.isEmpty() && isInTargetFC())
             {
-                // Refresh the timestamp for the most recent kick so it doesn't expire
                 PendingKick lastKick = pendingKicks.getLast();
                 lastKick.time = System.currentTimeMillis();
-                log.info("Kick confirmed in dialog. Refreshing timer for: " + lastKick.name);
+                log.info("Kick confirmed in dialog. Refreshing timer for: " + lastKick.displayName);
             }
+        }
+    }
+
+    private int getPlayerWorld(String standardTargetName)
+    {
+        FriendsChatManager fcManager = client.getFriendsChatManager();
+        if (fcManager != null) {
+            for (FriendsChatMember member : fcManager.getMembers()) {
+                if (Text.standardize(member.getName()).equals(standardTargetName)) {
+                    return member.getWorld();
+                }
+            }
+        }
+        return -1;
+    }
+
+    @Subscribe
+    public void onFriendsChatChanged(FriendsChatChanged event)
+    {
+        if (!pendingKicks.isEmpty())
+        {
+            log.info("FC state changed. Clearing {} stale kick(s) from memory.", pendingKicks.size());
+            pendingKicks.clear();
         }
     }
 
     @Subscribe
     public void onFriendsChatMemberLeft(FriendsChatMemberLeft event)
     {
-        String rawLeftName = Text.removeTags(event.getMember().getName()).replace('\u00A0', ' ').trim();
-        String standardLeftName = Text.standardize(rawLeftName);
+        if (!isInTargetFC()) {
+            return;
+        }
+
+        String standardLeftName = Text.standardize(event.getMember().getName());
 
         Iterator<PendingKick> it = pendingKicks.iterator();
         while (it.hasNext())
         {
             PendingKick pk = it.next();
 
-            // Window increased to 60 seconds to allow for slow confirmation screens
             if (System.currentTimeMillis() - pk.time > 30000) {
                 it.remove();
                 continue;
             }
 
-            if (Text.standardize(pk.name).equals(standardLeftName))
+            if (pk.standardName.equals(standardLeftName))
             {
-                log.info("Kick confirmed via FC Leave for: " + pk.name);
+                log.info("Kick confirmed via FC Leave for: " + pk.displayName);
                 it.remove();
 
-                SwingUtilities.invokeLater(() -> panel.addKick(pk.name));
-                sendWebhook(pk.name);
+                SwingUtilities.invokeLater(() -> panel.addKick(pk.displayName));
+                sendWebhook(pk.displayName, pk.world);
 
                 break;
             }
         }
     }
 
-    private void sendWebhook(String kickedPlayer)
+    private void sendWebhook(String displayPlayer, int world)
     {
-        if (!config.webhookEnabled() || config.webhookUrl().isEmpty())
+        if (!config.webhookEnabled() || config.webhookUrl() == null || config.webhookUrl().isEmpty())
         {
             return;
         }
@@ -182,8 +262,16 @@ public class KickHistory extends Plugin
             adminName = client.getLocalPlayer().getName();
         }
 
-        String jsonPayload = String.format("{\"content\": \"**Kick Logged:** `%s` was kicked from the chat by `%s`\"}",
-                kickedPlayer, adminName);
+        String fcOwner = "Unknown FC";
+        FriendsChatManager fcManager = client.getFriendsChatManager();
+        if (fcManager != null && fcManager.getOwner() != null) {
+            fcOwner = Text.removeTags(fcManager.getOwner());
+        }
+
+        String worldText = world > 0 ? " (W" + world + ")" : "";
+
+        String jsonPayload = String.format("{\"content\": \"**Kick Logged:** `%s`%s was kicked from `%s` by `%s`\"}",
+                displayPlayer, worldText, fcOwner, adminName);
 
         Request request = new Request.Builder()
                 .url(config.webhookUrl())
