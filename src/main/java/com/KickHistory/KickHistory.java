@@ -23,8 +23,10 @@ import okhttp3.*;
 
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedList;
+import java.util.List;
 
 @Slf4j
 @PluginDescriptor(
@@ -49,9 +51,12 @@ public class KickHistory extends Plugin
     private KickHistoryPanel panel;
     private NavigationButton navButton;
 
+    // Cached list of target FCs for performance
+    private final List<String> targetFcs = new ArrayList<>();
+
     private static class PendingKick {
-        String displayName; // The original cased name for Discord/UI
-        String standardName; // The lowercase name for matching
+        String displayName;
+        String standardName;
         long time;
         int world;
 
@@ -82,6 +87,9 @@ public class KickHistory extends Plugin
         {
             clientToolbar.addNavigation(navButton);
         }
+
+        // Build the cached list on startup
+        updateTargetFcs();
     }
 
     @Override
@@ -89,6 +97,21 @@ public class KickHistory extends Plugin
     {
         clientToolbar.removeNavigation(navButton);
         pendingKicks.clear();
+        targetFcs.clear();
+    }
+
+    // --- Helper to build the cached list once ---
+    private void updateTargetFcs()
+    {
+        targetFcs.clear();
+        String targetFcConfig = config.targetFcName();
+        if (targetFcConfig != null && !targetFcConfig.trim().isEmpty())
+        {
+            for (String owner : targetFcConfig.split(","))
+            {
+                targetFcs.add(Text.standardize(owner.trim()));
+            }
+        }
     }
 
     @Subscribe
@@ -110,12 +133,17 @@ public class KickHistory extends Plugin
                 clientToolbar.removeNavigation(navButton);
             }
         }
+        else if (event.getKey().equals("targetFcName"))
+        {
+            // Rebuild the cached list if the user edits the text box
+            updateTargetFcs();
+        }
     }
 
+    // --- Highly optimized check using the cached list ---
     private boolean isInTargetFC()
     {
-        String targetFcConfig = config.targetFcName();
-        if (targetFcConfig == null || targetFcConfig.trim().isEmpty()) {
+        if (targetFcs.isEmpty()) {
             return false;
         }
 
@@ -125,15 +153,7 @@ public class KickHistory extends Plugin
         }
 
         String currentOwner = Text.standardize(fcManager.getOwner());
-        String[] approvedOwners = targetFcConfig.split(",");
-
-        for (String approvedOwner : approvedOwners) {
-            if (Text.standardize(approvedOwner.trim()).equals(currentOwner)) {
-                return true;
-            }
-        }
-
-        return false;
+        return targetFcs.contains(currentOwner);
     }
 
     @Subscribe
@@ -152,13 +172,9 @@ public class KickHistory extends Plugin
                 target = target.substring(0, target.indexOf("("));
             }
 
-            // Keep the original capitalization but strip the spaces at the ends
             String displayName = target.trim();
-
-            // Create the lowercase version specifically for logic matching
             String standardName = Text.standardize(displayName);
 
-            // Remember that spaces and hyphens count towards the 12 character limit
             if (displayName.isEmpty() || displayName.length() > 12) {
                 return;
             }
@@ -195,7 +211,6 @@ public class KickHistory extends Plugin
     @Subscribe
     public void onFriendsChatChanged(FriendsChatChanged event)
     {
-        // Instantly clear the pending queue if the admin joins or leaves an FC
         if (!pendingKicks.isEmpty())
         {
             log.info("FC state changed. Clearing {} stale kick(s) from memory.", pendingKicks.size());
@@ -222,13 +237,11 @@ public class KickHistory extends Plugin
                 continue;
             }
 
-            // Compare using the standardized names
             if (pk.standardName.equals(standardLeftName))
             {
                 log.info("Kick confirmed via FC Leave for: " + pk.displayName);
                 it.remove();
 
-                // Pass the displayName to the UI and Discord so the capitals remain
                 SwingUtilities.invokeLater(() -> panel.addKick(pk.displayName));
                 sendWebhook(pk.displayName, pk.world);
 
@@ -239,7 +252,7 @@ public class KickHistory extends Plugin
 
     private void sendWebhook(String displayPlayer, int world)
     {
-        if (!config.webhookEnabled() || config.webhookUrl().isEmpty())
+        if (!config.webhookEnabled() || config.webhookUrl() == null || config.webhookUrl().isEmpty())
         {
             return;
         }
@@ -249,7 +262,6 @@ public class KickHistory extends Plugin
             adminName = client.getLocalPlayer().getName();
         }
 
-        // Grab the active Friends Chat name
         String fcOwner = "Unknown FC";
         FriendsChatManager fcManager = client.getFriendsChatManager();
         if (fcManager != null && fcManager.getOwner() != null) {
@@ -258,7 +270,6 @@ public class KickHistory extends Plugin
 
         String worldText = world > 0 ? " (W" + world + ")" : "";
 
-        // Added the fcOwner to the Discord output string
         String jsonPayload = String.format("{\"content\": \"**Kick Logged:** `%s`%s was kicked from `%s` by `%s`\"}",
                 displayPlayer, worldText, fcOwner, adminName);
 
