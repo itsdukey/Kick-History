@@ -14,8 +14,6 @@ public class KickHistoryPanel extends PluginPanel
     private final JTextArea logArea = new JTextArea();
     private final KickHistoryConfig config;
 
-    private static final String HEADER = "Date | Time | Username\n-------------------------\n";
-
     @Inject
     public KickHistoryPanel(KickHistoryConfig config)
     {
@@ -25,10 +23,23 @@ public class KickHistoryPanel extends PluginPanel
         setBorder(new EmptyBorder(10, 10, 10, 10));
         setLayout(new BorderLayout());
 
+        JPanel topPanel = new JPanel();
+        topPanel.setLayout(new BoxLayout(topPanel, BoxLayout.Y_AXIS));
+        topPanel.setBorder(new EmptyBorder(0, 0, 10, 0));
+
         JLabel title = new JLabel("Kick History Log");
         title.setForeground(Color.WHITE);
-        title.setHorizontalAlignment(SwingConstants.CENTER);
-        add(title, BorderLayout.NORTH);
+        title.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+        JLabel subTitle = new JLabel("Date | Time | Target");
+        subTitle.setForeground(Color.LIGHT_GRAY);
+        subTitle.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+        topPanel.add(title);
+        topPanel.add(Box.createRigidArea(new Dimension(0, 2)));
+        topPanel.add(subTitle);
+
+        add(topPanel, BorderLayout.NORTH);
 
         logArea.setEditable(false);
         logArea.setLineWrap(true);
@@ -36,8 +47,6 @@ public class KickHistoryPanel extends PluginPanel
         logArea.setBackground(new Color(40, 40, 40));
         logArea.setForeground(Color.WHITE);
         logArea.setMargin(new Insets(5, 5, 5, 5));
-
-        logArea.setText(HEADER);
 
         JScrollPane scrollPane = new JScrollPane(logArea);
         add(scrollPane, BorderLayout.CENTER);
@@ -49,7 +58,7 @@ public class KickHistoryPanel extends PluginPanel
         });
 
         JButton clearBtn = new JButton("Clear Log");
-        clearBtn.addActionListener(e -> logArea.setText(HEADER));
+        clearBtn.addActionListener(e -> logArea.setText(""));
 
         JPanel buttonPanel = new JPanel(new GridLayout(1, 2, 5, 0));
         buttonPanel.add(copyBtn);
@@ -63,12 +72,11 @@ public class KickHistoryPanel extends PluginPanel
         String dateStr = formatDate(now, config.dateFormat());
         String timeStr = formatTime(now, config.timeFormat());
 
-        String entry = String.format("%s | %s | %s\n", dateStr, timeStr, name);
+        String entry = String.format("%s | %s\n%s\n\n", dateStr, timeStr, name);
 
         SwingUtilities.invokeLater(() -> {
             logArea.append(entry);
 
-            // OPTIMIZATION: Prevent memory leaks by capping the UI log to 500 lines
             if (logArea.getLineCount() > 500) {
                 try {
                     int endOfFirstLine = logArea.getLineEndOffset(0);
