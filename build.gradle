@@ -20,15 +20,15 @@ repositories {
 
 dependencies {
     // Hub Standard: Use 'runelite-api' (not 'api') and 'client'
-    compileOnly 'net.runelite:runelite-api:1.12.26.3'
-    compileOnly 'net.runelite:client:1.12.26.3'
+    compileOnly 'net.runelite:runelite-api:1.13.5'
+    compileOnly 'net.runelite:client:1.13.5'
 
     compileOnly 'org.projectlombok:lombok:1.18.30'
     annotationProcessor 'org.projectlombok:lombok:1.18.30'
 
     // Local Test Dependencies: Must match the client version exactly
-    testImplementation 'net.runelite:runelite-api:1.12.26.3'
-    testImplementation 'net.runelite:client:1.12.26.3'
+    testImplementation 'net.runelite:runelite-api:1.13.5'
+    testImplementation 'net.runelite:client:1.13.5'
     testAnnotationProcessor 'org.projectlombok:lombok:1.18.30'
 }
 
