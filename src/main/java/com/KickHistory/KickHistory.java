@@ -7,7 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.FriendsChatManager;
 import net.runelite.api.FriendsChatMember;
-import net.runelite.api.events.FriendsChatChanged;
+import net.runelite.api.events.FriendsChatSync;
 import net.runelite.api.events.FriendsChatMemberLeft;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.client.config.ConfigManager;
@@ -209,7 +209,7 @@ public class KickHistory extends Plugin
     }
 
     @Subscribe
-    public void onFriendsChatChanged(FriendsChatChanged event)
+    public void onFriendsChatSync(FriendsChatSync event)
     {
         if (!pendingKicks.isEmpty())
         {
